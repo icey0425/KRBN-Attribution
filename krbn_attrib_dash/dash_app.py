@@ -64,22 +64,38 @@ def create_app(attrib_daily, attrib_totals, krbn_index_returns=None):
                     [
                         html.H2(
                             "KRBN LN Weight-Difference Attribution (v1)",
-                            style={"margin": "0 0 12px 0", "fontSize": "1.25rem", "fontWeight": "600", "textAlign": "left"},
+                            style={"margin": "0 0 12px 0", "fontSize": "1.9rem", "fontWeight": "700", "textAlign": "left"},
                         ),
                         html.Div(
                             [
-                                dcc.DatePickerRange(
-                                    id="date-range",
-                                    min_date_allowed=min_date,
-                                    max_date_allowed=max_date,
-                                    start_date=min_date,
-                                    end_date=max_date,
-                                    display_format="YYYY-MM-DD",
+                                html.Div(
+                                    [
+                                        html.Div("Start Date", style={"fontSize": "0.85rem", "color": "#64748b", "marginBottom": "4px"}),
+                                        dcc.DatePickerSingle(
+                                            id="start-date",
+                                            min_date_allowed=min_date,
+                                            max_date_allowed=max_date,
+                                            date=min_date,
+                                            display_format="YYYY-MM-DD",
+                                        ),
+                                    ]
+                                ),
+                                html.Div(
+                                    [
+                                        html.Div("End Date", style={"fontSize": "0.85rem", "color": "#64748b", "marginBottom": "4px"}),
+                                        dcc.DatePickerSingle(
+                                            id="end-date",
+                                            min_date_allowed=min_date,
+                                            max_date_allowed=max_date,
+                                            date=max_date,
+                                            display_format="YYYY-MM-DD",
+                                        ),
+                                    ]
                                 ),
                                 html.Button("Recompute from raw", id="recompute-btn", n_clicks=0, style={"marginLeft": "12px"}),
                                 html.Span(id="recompute-status", style={"marginLeft": "8px", "fontSize": "0.8125rem", "color": "#64748b"}),
                             ],
-                            style={"display": "flex", "alignItems": "center", "gap": "8px"},
+                            style={"display": "flex", "alignItems": "flex-end", "gap": "12px"},
                         ),
                     ],
                     style=container_style,
@@ -111,7 +127,7 @@ def create_app(attrib_daily, attrib_totals, krbn_index_returns=None):
                         ),
                         html.Div(
                             [
-                                html.H4("Contract-level period attribution", style={"margin": "0 0 12px 0", "fontSize": "0.9375rem", "fontWeight": "600", "textAlign": "left"}),
+                                html.H4("Contract-level period attribution", style={"margin": "0 0 12px 0", "fontSize": "1.25rem", "fontWeight": "700", "textAlign": "left"}),
                                 dash_table.DataTable(
                                     id="contract-table",
                                     columns=[
@@ -137,7 +153,7 @@ def create_app(attrib_daily, attrib_totals, krbn_index_returns=None):
                         ),
                         html.Div(
                             [
-                                html.H4("Daily diagnostics", style={"margin": "0 0 12px 0", "fontSize": "0.9375rem", "fontWeight": "600", "textAlign": "left"}),
+                                html.H4("Daily diagnostics", style={"margin": "0 0 12px 0", "fontSize": "1.25rem", "fontWeight": "700", "textAlign": "left"}),
                                 dash_table.DataTable(
                                     id="diagnostics-table",
                                     columns=[
@@ -217,7 +233,7 @@ def create_app(attrib_daily, attrib_totals, krbn_index_returns=None):
             Output("diagnostics-table", "data"),
         ],
         [Input("store-totals", "data"), Input("store-attrib", "data"), Input("store-krbn-index", "data")],
-        [Input("date-range", "start_date"), Input("date-range", "end_date")],
+        [Input("start-date", "date"), Input("end-date", "date")],
     )
     def update(totals_data, attrib_data, price_data, start_date, end_date):
         empty_fig = go.Figure().add_annotation(text="No data. Run pipeline or add parquet files.", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
@@ -232,10 +248,16 @@ def create_app(attrib_daily, attrib_totals, krbn_index_returns=None):
         attrib = pd.DataFrame(attrib_data)
         totals["statement_date"] = pd.to_datetime(totals["statement_date"])
         attrib["statement_date"] = pd.to_datetime(attrib["statement_date"])
-        if start_date and end_date:
-            start, end = pd.Timestamp(start_date).normalize(), pd.Timestamp(end_date).normalize()
-            totals = totals[(totals["statement_date"] >= start) & (totals["statement_date"] <= end)]
-            attrib = attrib[(attrib["statement_date"] >= start) & (attrib["statement_date"] <= end)]
+        start = pd.Timestamp(start_date).normalize() if start_date else None
+        end = pd.Timestamp(end_date).normalize() if end_date else None
+        if start is not None and end is not None and start > end:
+            start, end = end, start
+        if start is not None:
+            totals = totals[totals["statement_date"] >= start]
+            attrib = attrib[attrib["statement_date"] >= start]
+        if end is not None:
+            totals = totals[totals["statement_date"] <= end]
+            attrib = attrib[attrib["statement_date"] <= end]
 
         totals = totals.sort_values("statement_date").reset_index(drop=True)
         totals["cum_contrib"] = totals["total_contrib"].cumsum()
@@ -258,9 +280,10 @@ def create_app(attrib_daily, attrib_totals, krbn_index_returns=None):
                 df = pd.DataFrame()
             else:
                 df["Date"] = pd.to_datetime(df[date_col])
-                if start_date and end_date:
-                    start, end = pd.Timestamp(start_date).normalize(), pd.Timestamp(end_date).normalize()
-                    df = df[(df["Date"] >= start) & (df["Date"] <= end)]
+                if start is not None:
+                    df = df[df["Date"] >= start]
+                if end is not None:
+                    df = df[df["Date"] <= end]
                 df = df.sort_values("Date").reset_index(drop=True)
                 # Support: fund_ret_pct/index_ret_pct (%), or krbn_ret/index_ret (decimal), or raw "KRBN LN"/"GLCARBP Index" (%)
                 if "fund_ret_pct" in df.columns and "index_ret_pct" in df.columns:
